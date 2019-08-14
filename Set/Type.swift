@@ -8,6 +8,11 @@
 
 import Foundation
 
+/// Each set card propery can be described with this 3 types (or variants).
+///
+/// - type1: the first variant.
+/// - type2: the second variant.
+/// - type3: the third variant.
 enum Type: Int, CaseIterable {
     case type1 = 1
     case type2
