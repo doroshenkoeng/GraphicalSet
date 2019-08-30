@@ -6,23 +6,6 @@ import UIKit
 
 /// The struct provides model API for the card game set.
 struct Set {
-    
-    /// Usually the set deck contains 81 cards.
-    var deck = [Card]()
-    
-    /// The game score that correlate with speed of play, number of deal 3 more requests.
-    var score = 0
-    
-    /// The number of deal 3 more cards requests.
-    /// It doesn't increment after touching deal 3 more button if there is no set available among visible cards.
-    var numberOfDeal3More = 0
-    
-    /// The property showes a speed of play.
-    private var timeOfLastSetTesting = CACurrentMediaTime()
-    
-    /// The propery is used to store the cards that currently are a set.
-    var setOfCards = Swift.Set<Card>()
-    
     /// The set game initializer for generating the game deck.
     init() {
         for color in Type.allCases {
@@ -36,13 +19,17 @@ struct Set {
             }
         }
         deck.shuffle()
+        for _ in 0..<12 {
+            if let card = deck.popLast() {
+                visibleCards += [card]
+            }
+        }
     }
-    
     /// The method checks whether the given set of cards is a set or not.
     ///
     /// - Parameter testCards: The cards for testing.
     /// - Returns: true if testCards are a set or false if they aren't.
-    func isSet(_ testCards: Swift.Set<Card>) -> Bool {
+    func isSet(_ testCards: [Card]) -> Bool {
         var sum = [0, 0, 0, 0]
         let _ = testCards.map {
             sum[0] += $0.color.rawValue; sum[1] += $0.fill.rawValue
@@ -52,50 +39,171 @@ struct Set {
                (sum[2] % 3) == 0 && (sum[3] % 3) == 0
     }
     
-    /// The method increases the game score according to speed of play.
-    mutating func increaseScore() {
-        score += timeIntervalFromLastSetTesting() < 8.0 ? 5 : 3
+    private(set) var score = 0
+    
+    private(set) var visibleCards = [Card]()
+    private(set) var cardsSelected = [Card]()
+    private(set) var cardsTryMatched = [Card]()
+    private(set) var cardsRemoved = [Card]()
+    
+    private var deck = [Card]()
+    
+    /// Uses isSet(_ testCards: [Card]) method to find the set among tested cards.
+    /// Updates the game score.
+    var isSet: Bool? {
+        get {
+            guard cardsTryMatched.count == 3 else { return nil }
+            return isSet(cardsTryMatched)
+        }
+        set {
+            if newValue != nil {
+                if newValue! {
+                    score += ScorePoints.matchBonus
+                } else {
+                    score -= ScorePoints.missMatchPenalty
+                    if score < 0 { score = 0 }
+                }
+                cardsTryMatched = cardsSelected
+                cardsSelected.removeAll()
+            } else {
+                cardsTryMatched.removeAll()
+            }
+        }
     }
     
-    /// The method penalizes the game score according to speed of play and number of deal 3 more requests.
-    mutating func penaltyScore() {
-        if score > 0 {
-            score -= timeIntervalFromLastSetTesting() > 20 ? 8 : 5 + numberOfDeal3More
-        }
-        if score < 0 {
-            score = 0
-        }
-    }
-    
-    /// The method figures out the time interval from the last set testing.
+    /// Responds to choose a card from the table.
     ///
-    /// - Returns: An interval from the last set testing.
-    private mutating func timeIntervalFromLastSetTesting() -> Double {
-        let prevTimeOfLastCardTouch = timeOfLastSetTesting
-        timeOfLastSetTesting = CACurrentMediaTime()
-        return timeOfLastSetTesting - prevTimeOfLastCardTouch
+    /// - Parameter index: An index of the chosen card in the visible cards array.
+    mutating func chooseCard(at index: Int) {
+        assert(visibleCards.indices.contains(index), "Set.chooseCard(at: \(index)): Chosen index is out of range")
+        let chosenCard = visibleCards[index]
+        if !cardsRemoved.contains(chosenCard), !cardsTryMatched.contains(chosenCard) {
+            if  isSet != nil {
+                if isSet! { replaceOrRemove3Cards()}
+                isSet = nil
+            }
+            if cardsSelected.count == 2, !cardsSelected.contains(chosenCard) {
+                cardsSelected += [chosenCard]
+                isSet = isSet(cardsSelected)
+            } else {
+                cardsSelected.inOut(element: chosenCard)
+            }
+        }
     }
     
-    /// The method checks whether an available set among the visible cards exists using brute force.
-    /// The time conplexity is O(n^3), n - a number of visible cards.
-    /// - Parameter visibleCards: the cards
-    /// - Returns: true if there is a set among the visible cadrs or false if there is not any set.
-    mutating func isThereASetAvailableIn(visibleCards: [Card]) -> Bool {
-        guard visibleCards.count > 2 else { return false }
-        setOfCards.removeAll()
-        for i in 0..<visibleCards.count - 2 {
-            for j in (i+1)..<visibleCards.count - 1 {
-                for k in (j+1)..<visibleCards.count {
-                    let setOfCards: Swift.Set<Card> = [visibleCards[i], visibleCards[j], visibleCards[k]]
-                    if (isSet(setOfCards)) {
-                        self.setOfCards = setOfCards
-                        return true
+    /// Removes or replaces 3 chosen cards from a table.
+    private mutating func replaceOrRemove3Cards(){
+        if visibleCards.count == Set.startNumberCards, let take3Cards =  take3FromDeck() {
+            visibleCards.replace(elements: cardsTryMatched, with: take3Cards)
+        } else {
+            visibleCards.remove(elements: cardsTryMatched)
+        }
+        cardsRemoved += cardsTryMatched
+        cardsTryMatched.removeAll()
+    }
+    
+    /// Draws 3 more cards
+    ///
+    /// - Returns: 3 more cards from the deck.
+    private mutating func take3FromDeck() -> [Card]?{
+        var threeCards = [Card]()
+        for _ in 0...2 {
+            if let card = deck.popLast() {
+                threeCards += [card]
+            } else {
+                return nil
+            }
+        }
+        return threeCards
+    }
+    
+    /// Responds to deal 3 more cards request from the user.
+    mutating func deal3() {
+        if let deal3Cards =  take3FromDeck() {
+            visibleCards += deal3Cards
+        }
+    }
+    
+    /// Finds all the visible sets and removes one of them if there is a set among chosen cards.
+    var hints: [[Int]] {
+        var hints = [[Int]]()
+        if visibleCards.count > 2 {
+            for i in 0..<visibleCards.count {
+                for j in (i+1)..<visibleCards.count {
+                    for k in (j+1)..<visibleCards.count {
+                        let cards = [visibleCards[i], visibleCards[j], visibleCards[k]]
+                        if isSet(cards) {
+                            hints.append([i,j,k])
+                        }
                     }
                 }
             }
         }
-        return false
+        if isSet == true {
+            let matchIndices = visibleCards.indices(of: cardsTryMatched)
+            return hints.map{ Swift.Set($0) }
+                .filter{$0.intersection(Swift.Set(matchIndices)).isEmpty }
+                .map{Array($0)}
+        }
+        return hints
+    }
+    
+    mutating func shuffle() { visibleCards.shuffle() }
+    
+    /// Some score constants.
+    private struct ScorePoints {
+        static let matchBonus = 10
+        static let missMatchPenalty = 5
+    }
+    static let startNumberCards = 12
+}
+
+extension Array where Element : Equatable {
+    
+    /// Ins element if an array doesn't consist the elelemt and vice versa.
+    ///
+    /// - Parameter element: An element of an array
+    mutating func inOut(element: Element){
+        if let from = self.firstIndex(of:element)  {
+            self.remove(at: from)
+        } else {
+            self += [element]
+        }
+    }
+    
+    /// Removes the given array from the self array.
+    ///
+    /// - Parameter elements: An array of generic type.
+    mutating func remove(elements: [Element]){
+        self = self.filter { !elements.contains($0) }
+    }
+    
+    /// Replaces the old given elements with the given new ones.
+    ///
+    /// - Parameters:
+    ///   - elements: The old elements.
+    ///   - new: The new elements.
+    mutating func replace(elements: [Element], with new: [Element] ) {
+        guard elements.count == new.count else { return }
+        for index in 0..<new.count {
+            if let indexMatched = self.firstIndex(of: elements[index]){
+                self[indexMatched] = new[index]
+            }
+        }
+    }
+    
+    /// Finds self array indices of the given arrray elements.
+    ///
+    /// - Parameter elements: The array of a generic type.
+    /// - Returns: The array of occurence elements indices.
+    func indices(of elements: [Element]) ->[Int]{
+        guard self.count >= elements.count, elements.count > 0 else {return []}
+        return elements.map{self.firstIndex(of: $0)}.compactMap{$0}
     }
 }
+
+    
+
+
 
 

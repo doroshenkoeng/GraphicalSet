@@ -11,10 +11,10 @@ import Foundation
 /// The struct represents a card in the game set.
 struct Card
 {
-    let color: Type
-    let shape: Type
-    let fill: Type
-    let numberOfShapes: Type
+    var color: Type
+    var shape: Type
+    var fill: Type
+    var numberOfShapes: Type
 }
 
 // MARK: - The extension gives an opportunity to use a card dicitionary.
